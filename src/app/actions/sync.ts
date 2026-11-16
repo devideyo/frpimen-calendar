@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { DateTime } from 'luxon'
 import { refreshGoogleToken, listGoogleEvents } from '@/lib/google/calendar'
 
 export async function syncGoogleCalendar() {
@@ -57,21 +58,27 @@ export async function syncGoogleCalendar() {
     .eq('name', 'Other')
     .single()
 
-  const rows = events
-    .filter((ev) => ev.start && ev.end)
+  // All-day events come as plain dates: anchor them to local midnight, not UTC midnight
+  const toUtc = (dt?: string, d?: string) =>
+    dt ?? (d ? DateTime.fromISO(d, { zone: 'America/Chicago' }).toUTC().toISO() : null)
+
+  const usable = events.filter((ev) => ev.start && ev.end)
+  const cancelledIds = usable.filter((ev) => ev.status === 'cancelled').map((ev) => ev.id)
+  const rows = usable
+    .filter((ev) => ev.status !== 'cancelled')
     .map((ev) => ({
       owner_id: user.id,
       google_event_id: ev.id,
       title: ev.summary ?? 'Untitled',
       description: ev.description ?? null,
       location: ev.location ?? null,
-      starts_at: ev.start.dateTime ?? ev.start.date ?? null,
-      ends_at: ev.end.dateTime ?? ev.end.date ?? null,
+      starts_at: toUtc(ev.start.dateTime, ev.start.date),
+      ends_at: toUtc(ev.end.dateTime, ev.end.date),
       all_day: !ev.start.dateTime,
       meeting_type_id: defaultType?.id ?? null,
       busy_level: ev.transparency === 'transparent' ? 'free' : 'busy',
       visibility: ev.visibility === 'private' ? 'private' : 'default',
-      status: ev.status === 'cancelled' ? 'cancelled' : 'confirmed',
+      status: 'confirmed',
     }))
 
   if (rows.length > 0) {
@@ -79,6 +86,24 @@ export async function syncGoogleCalendar() {
       .from('events')
       .upsert(rows, { onConflict: 'google_event_id' })
     if (error) return { error: error.message }
+  }
+
+  // Remove local copies of events that were deleted/cancelled in Google.
+  // Only touches Google-synced rows (google_event_id not null) inside the synced window,
+  // and only after a complete listing (listGoogleEvents throws on partial results).
+  const liveIds = new Set(rows.map((r) => r.google_event_id))
+  const { data: local } = await supabase
+    .from('events')
+    .select('id, google_event_id')
+    .eq('owner_id', user.id)
+    .not('google_event_id', 'is', null)
+    .gte('starts_at', timeMin)
+    .lte('starts_at', timeMax)
+  const staleIds = (local ?? [])
+    .filter((l: any) => !liveIds.has(l.google_event_id) || cancelledIds.includes(l.google_event_id))
+    .map((l: any) => l.id)
+  if (staleIds.length > 0) {
+    await supabase.from('events').delete().eq('owner_id', user.id).in('id', staleIds)
   }
 
   revalidatePath('/')

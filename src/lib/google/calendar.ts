@@ -25,22 +25,33 @@ export async function refreshGoogleToken(refreshToken: string) {
     timeMin: string,
     timeMax: string
   ) {
-    const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events')
-    url.searchParams.set('timeMin', timeMin)
-    url.searchParams.set('timeMax', timeMax)
-    url.searchParams.set('maxResults', '250')
-    url.searchParams.set('singleEvents', 'true')
-    url.searchParams.set('orderBy', 'startTime')
-  
-    const resp = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-    if (!resp.ok) {
-      const text = await resp.text()
-      throw new Error(`Google Calendar API error: ${resp.status} ${text}`)
-    }
-    const data = await resp.json()
-    return (data.items ?? []) as GoogleCalendarEvent[]
+    const all: GoogleCalendarEvent[] = []
+    let pageToken: string | undefined
+    let pages = 0
+    do {
+      const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events')
+      url.searchParams.set('timeMin', timeMin)
+      url.searchParams.set('timeMax', timeMax)
+      url.searchParams.set('maxResults', '250')
+      url.searchParams.set('singleEvents', 'true')
+      url.searchParams.set('orderBy', 'startTime')
+      if (pageToken) url.searchParams.set('pageToken', pageToken)
+
+      const resp = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (!resp.ok) {
+        const text = await resp.text()
+        throw new Error(`Google Calendar API error: ${resp.status} ${text}`)
+      }
+      const data = await resp.json()
+      all.push(...((data.items ?? []) as GoogleCalendarEvent[]))
+      pageToken = data.nextPageToken
+      pages++
+    } while (pageToken && pages < 20)
+    // Incomplete listing: throw so callers never treat a partial list as complete (deletions depend on it)
+    if (pageToken) throw new Error('Google Calendar returned too many events to sync')
+    return all
   }
   
   export type GoogleCalendarEvent = {

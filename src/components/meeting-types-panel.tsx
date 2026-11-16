@@ -61,7 +61,7 @@ export function MeetingTypesPanel({ types }: { types: MType[] }) {
             </div>
             <label className="block">
               <span className="text-[11.5px] uppercase tracking-wide text-neutral-500 font-medium">Name</span>
-              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Mass"
+              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Divine Liturgy"
                      className="mt-1 w-full px-3 py-2 rounded-lg border border-neutral-200 focus:outline-none focus:border-neutral-400 text-[14px]" />
             </label>
             <div>
@@ -95,7 +95,7 @@ export function MeetingTypesPanel({ types }: { types: MType[] }) {
         <div className="bg-white rounded-2xl border border-neutral-200 p-8 text-center">
           <p className="text-sm text-neutral-600 mb-3">No meeting types yet.</p>
           <button onClick={seedDefaults} className="text-[13px] font-medium px-4 py-2 rounded-full bg-neutral-900 text-white hover:bg-neutral-800">
-            Add 9 default types (Mass, Confession, Baptism, Wedding, Funeral, Counseling, Hospital visit, Meeting, Personal)
+            Add 9 default types (Divine Liturgy, Confession, Baptism, Wedding, Funeral, Counseling, Hospital visit, Meeting, Personal)
           </button>
         </div>
       )}

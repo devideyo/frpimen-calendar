@@ -20,6 +20,7 @@ export type CalendarEvent = {
   start?: string
   end?: string
   rrule?: any
+  exdate?: string[]
   duration?: any
   allDay?: boolean
   backgroundColor?: string

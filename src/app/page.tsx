@@ -6,6 +6,8 @@ import type { CalendarEvent } from '@/components/calendar-view'
 import { AppSidebar } from '@/components/app-sidebar'
 import { LiturgicalBanner } from '@/components/liturgical-banner'
 import { SyncButton } from '@/components/sync-button'
+import { RRule } from 'rrule'
+import { splitLegacyRrule } from '@/lib/recurrence'
 
 const TZ = 'America/Chicago'
 
@@ -14,14 +16,16 @@ export default async function HomePage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [profileResp, eventsResp, typesResp] = await Promise.all([
+  const [profileResp, eventsResp, sharedResp, typesResp] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
-    supabase.from('events').select('*, meeting_types(id, name, color)').order('starts_at'),
+    supabase.from('events').select('*, meeting_types(id, name, color)').eq('owner_id', user.id).order('starts_at'),
+    // Events other people shared with me, already reduced by the DB to what each share allows
+    supabase.rpc('shared_events'),
     supabase.from('meeting_types').select('*').eq('owner_id', user.id).order('name'),
   ])
 
   const profile = profileResp.data
-  const rawEvents = eventsResp.data ?? []
+  const rawEvents = [...(eventsResp.data ?? []), ...((sharedResp.data as any[]) ?? [])]
   const meetingTypes = typesResp.data ?? []
 
   const seen = new Set<string>()
@@ -37,7 +41,7 @@ export default async function HomePage() {
     allDay: e.all_day,
     // When recurring, ONLY pass rrule (omit start/end) so FullCalendar doesn't render both master + instance
     ...(e.rrule
-      ? { rrule: { freq: parseFreq(e.rrule), dtstart: ensureUtc(e.starts_at), ...parseRruleOptions(e.rrule) }, duration: msDiff(e.starts_at, e.ends_at) }
+      ? { ...buildRecurring(e), duration: msDiff(e.starts_at, e.ends_at) }
       : { start: ensureUtc(e.starts_at), end: ensureUtc(e.ends_at) }),
     backgroundColor: e.meeting_types?.color ?? colorFromId(e.id),
     borderColor: e.meeting_types?.color ?? colorFromId(e.id),
@@ -112,25 +116,17 @@ export default async function HomePage() {
   )
 }
 
-function parseFreq(rrule: string): string {
-  const m = rrule.toUpperCase().match(/FREQ=(\w+)/)
-  return m ? m[1].toLowerCase() : 'weekly'
-}
-function parseRruleOptions(rrule: string): any {
-  const opts: any = {}
-  const upper = rrule.toUpperCase()
-  const interval = upper.match(/INTERVAL=(\d+)/)
-  if (interval) opts.interval = parseInt(interval[1])
-  const byday = upper.match(/BYDAY=([A-Z0-9,]+)/)
-  if (byday) opts.byweekday = byday[1].split(',').map(parseWeekday).filter(Boolean)
-  const bymonthday = upper.match(/BYMONTHDAY=(\d+)/)
-  if (bymonthday) opts.bymonthday = [parseInt(bymonthday[1])]
-  return opts
-}
-function parseWeekday(s: string): string | null {
-  const m = s.match(/^(-?\d+)?([A-Z]{2})$/)
-  if (!m) return null
-  return m[2].toLowerCase()
+// Parse the full RRULE (FREQ/INTERVAL/BYDAY/BYMONTHDAY/COUNT/UNTIL/...) with the rrule library.
+// Exceptions come from events.exdates (plus any legacy ;EXDATE= fragment) and are passed as `exdate`.
+function buildRecurring(e: any): { rrule: any; exdate?: string[] } {
+  const { rule, legacyExdates } = splitLegacyRrule(e.rrule)
+  const exdate = [...(e.exdates ?? []).map((d: string) => ensureUtc(d)), ...legacyExdates]
+  try {
+    const opts: any = RRule.parseString(rule)
+    return { rrule: { ...opts, dtstart: ensureUtc(e.starts_at) }, ...(exdate.length ? { exdate } : {}) }
+  } catch {
+    return { rrule: { freq: 'weekly', dtstart: ensureUtc(e.starts_at) }, ...(exdate.length ? { exdate } : {}) }
+  }
 }
 function msDiff(a: string, b: string): { milliseconds: number } {
   return { milliseconds: new Date(ensureUtc(b)).getTime() - new Date(ensureUtc(a)).getTime() }

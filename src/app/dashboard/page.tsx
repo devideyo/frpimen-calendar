@@ -53,7 +53,7 @@ export default async function DashboardPage() {
 
   const { data: overdueTasks } = await supabase
     .from('tasks').select('id').eq('owner_id', user.id).eq('status', 'open')
-    .lt('due_date', now.toISOString().split('T')[0])
+    .lt('due_at', now.toISOString())
 
   const typeCounts = new Map<string, { name: string; color: string; count: number }>()
   for (const e of next30 ?? []) {

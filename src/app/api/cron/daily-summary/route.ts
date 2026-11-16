@@ -52,10 +52,10 @@ async function runSummary() {
 
     const { data: tasks } = await admin
       .from('tasks')
-      .select('title, priority, due_date')
+      .select('title, priority, due_at')
       .eq('owner_id', p.id)
       .eq('status', 'open')
-      .lte('due_date', now.toISODate())
+      .lte('due_at', endUtc)
       .order('priority', { ascending: false })
       .limit(10)
 
@@ -70,7 +70,7 @@ async function runSummary() {
     const tasksHtml = (tasks ?? []).length === 0
       ? '<p style="color:#64748b;">No open tasks due.</p>'
       : `<ul style="padding-left:18px;line-height:1.7;">${(tasks ?? []).map(t =>
-          `<li>${escapeHtml(t.title)}${t.due_date ? ` <span style="color:#64748b;">(due ${t.due_date})</span>` : ''} <span style="color:#94a3b8;">— ${t.priority}</span></li>`
+          `<li>${escapeHtml(t.title)}${t.due_at ? ` <span style="color:#64748b;">(due ${DateTime.fromISO(t.due_at, { zone: 'utc' }).setZone(TZ).toFormat('LLL d')})</span>` : ''} <span style="color:#94a3b8;">— ${t.priority}</span></li>`
         ).join('')}</ul>`
 
     const greet = p.full_name ? `Good morning, ${escapeHtml(p.full_name)}` : 'Good morning'

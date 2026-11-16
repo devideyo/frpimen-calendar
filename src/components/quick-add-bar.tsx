@@ -63,7 +63,7 @@ export function QuickAddBar() {
               value={text}
               onChange={e => { setText(e.target.value); setError('') }}
               onKeyDown={e => { if (e.key === 'Enter') submit() }}
-              placeholder='Try "Mass tomorrow 9am at St Mary&apos;s"'
+              placeholder='Try "Divine Liturgy tomorrow 9am at St Mary&apos;s"'
               className="flex-1 bg-transparent border-0 outline-none text-[14.5px] placeholder:text-neutral-400"
             />
             <button onClick={() => setOpen(false)} className="text-neutral-400 hover:text-neutral-700">

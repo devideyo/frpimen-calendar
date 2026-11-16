@@ -65,8 +65,8 @@ export function TemplatesPanel({ templates, meetingTypes }: { templates: Templat
             className="bg-white rounded-2xl border border-neutral-200 p-5 space-y-3"
           >
             <h3 className="font-semibold text-[15px]">New template</h3>
-            <Input label="Template name"        value={form.name}     onChange={v => setForm({ ...form, name: v })}     placeholder="Sunday Mass" />
-            <Input label="Event title"          value={form.title}    onChange={v => setForm({ ...form, title: v })}    placeholder="Mass" />
+            <Input label="Template name"        value={form.name}     onChange={v => setForm({ ...form, name: v })}     placeholder="Sunday Divine Liturgy" />
+            <Input label="Event title"          value={form.title}    onChange={v => setForm({ ...form, title: v })}    placeholder="Divine Liturgy" />
             <Input label="Location"             value={form.location} onChange={v => setForm({ ...form, location: v })} placeholder="St Mary's" />
             <Input label="Notes"                value={form.description} onChange={v => setForm({ ...form, description: v })} placeholder="Optional" />
             <div className="grid grid-cols-2 gap-3">

@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { splitLegacyRrule } from '@/lib/recurrence'
 
 type Scope = 'occurrence' | 'future' | 'series'
 
@@ -21,25 +22,38 @@ export async function deleteRecurring(eventId: string, scope: Scope, occurrenceD
   }
 
   if (scope === 'future' && occurrenceDate) {
-    // Add UNTIL to rrule, ending series before this occurrence
-    const until = new Date(occurrenceDate)
-    until.setUTCDate(until.getUTCDate() - 1)
+    const occ = new Date(occurrenceDate)
+    if (Number.isNaN(occ.getTime())) return { error: 'invalid date' }
+    // First occurrence: deleting this-and-future removes the whole series
+    if (occ.getTime() <= new Date(event.starts_at).getTime()) {
+      await supabase.from('events').delete().eq('id', eventId).eq('owner_id', user.id)
+      revalidatePath('/')
+      return { success: true }
+    }
+    // End the series just before this occurrence. UNTIL and COUNT are mutually exclusive in RFC 5545.
+    const until = new Date(occ.getTime() - 1000)
     const untilStr = until.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
-    const newRrule = event.rrule.includes('UNTIL=')
-      ? event.rrule.replace(/UNTIL=[^;]+/, `UNTIL=${untilStr}`)
-      : `${event.rrule};UNTIL=${untilStr}`
+    const { rule } = splitLegacyRrule(event.rrule)
+    const newRrule = rule
+      .split(';')
+      .filter((p) => !/^(UNTIL|COUNT)=/i.test(p))
+      .concat(`UNTIL=${untilStr}`)
+      .join(';')
     await supabase.from('events').update({ rrule: newRrule }).eq('id', eventId).eq('owner_id', user.id)
     revalidatePath('/')
     return { success: true }
   }
 
   if (scope === 'occurrence' && occurrenceDate) {
-    // Append EXDATE to rrule
-    const exdate = new Date(occurrenceDate).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
-    const newRrule = event.rrule.includes('EXDATE=')
-      ? event.rrule.replace(/EXDATE=([^;]*)/, (_m: string, list: string) => `EXDATE=${list},${exdate}`)
-      : `${event.rrule};EXDATE=${exdate}`
-    await supabase.from('events').update({ rrule: newRrule }).eq('id', eventId).eq('owner_id', user.id)
+    const occ = new Date(occurrenceDate)
+    if (Number.isNaN(occ.getTime())) return { error: 'invalid date' }
+    // Exceptions live in a separate timestamptz[] column (events.exdates), not inside the RRULE string.
+    // Also migrate any legacy ";EXDATE=" fragment out of the rule.
+    const { rule, legacyExdates } = splitLegacyRrule(event.rrule)
+    const existing: string[] = (event.exdates ?? []).map((d: string) => new Date(d).toISOString())
+    const all = Array.from(new Set([...existing, ...legacyExdates, occ.toISOString()]))
+    const { error } = await supabase.from('events').update({ rrule: rule, exdates: all }).eq('id', eventId).eq('owner_id', user.id)
+    if (error) return { error: error.message }
     revalidatePath('/')
     return { success: true }
   }

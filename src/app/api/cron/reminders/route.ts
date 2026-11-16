@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import webpush from 'web-push'
+import { RRule, RRuleSet } from 'rrule'
+import { splitLegacyRrule } from '@/lib/recurrence'
 
 // Runs every 5 min via Vercel cron. Sends push for events starting in next 15 min.
 export async function GET(req: Request) {
   const reqUrl = new URL(req.url)
   const queryKey = reqUrl.searchParams.get('key')
   const headerKey = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/, '')
-  if (queryKey !== process.env.CRON_SECRET && headerKey !== process.env.CRON_SECRET) {
+  const secret = process.env.CRON_SECRET
+  // Fail closed when CRON_SECRET is unset (otherwise undefined/'' could match)
+  if (!secret || (queryKey !== secret && headerKey !== secret)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
@@ -22,17 +26,43 @@ export async function GET(req: Request) {
   )
 
   const now = new Date()
-  const in15 = new Date(now.getTime() + 15 * 60_000)
-  const in16 = new Date(now.getTime() + 16 * 60_000)
+  // Window must cover the ping interval (UPTIME_ROBOT.md: every 5 min) so no event is skipped.
+  // Events starting 10-15 min from now are reminded on the tick where they enter that window.
+  const WINDOW_MIN = Number(process.env.REMINDER_INTERVAL_MIN ?? 5)
+  const lead = 15
+  const winStart = new Date(now.getTime() + (lead - WINDOW_MIN) * 60_000)
+  const winEnd = new Date(now.getTime() + lead * 60_000)
 
-  // Events starting in 15-16 minutes — single 1-min window per cron tick
-  const { data: events } = await sb
+  const { data: single } = await sb
     .from('events')
-    .select('id, title, owner_id, starts_at, location')
-    .gte('starts_at', in15.toISOString())
-    .lt('starts_at', in16.toISOString())
+    .select('id, title, owner_id, starts_at, location, status, all_day')
+    .is('rrule', null)
+    .gte('starts_at', winStart.toISOString())
+    .lt('starts_at', winEnd.toISOString())
 
-  if (!events?.length) return NextResponse.json({ sent: 0 })
+  // Recurring masters: expand occurrences that fall inside the window
+  const { data: masters } = await sb
+    .from('events')
+    .select('id, title, owner_id, starts_at, location, status, all_day, rrule, exdates')
+    .not('rrule', 'is', null)
+    .lte('starts_at', winEnd.toISOString())
+
+  const events: { id: string; title: string; owner_id: string; location: string | null }[] = (single ?? [])
+    .filter((e: any) => e.status !== 'cancelled' && !e.all_day)
+  for (const m of (masters ?? []) as any[]) {
+    if (m.status === 'cancelled' || m.all_day) continue
+    try {
+      const { rule, legacyExdates } = splitLegacyRrule(m.rrule)
+      const set = new RRuleSet()
+      set.rrule(new RRule({ ...RRule.parseString(rule), dtstart: new Date(m.starts_at) }))
+      for (const x of [...(m.exdates ?? []), ...legacyExdates]) set.exdate(new Date(x))
+      if (set.between(winStart, winEnd, true).some((d) => d.getTime() >= winStart.getTime() && d.getTime() < winEnd.getTime())) {
+        events.push(m)
+      }
+    } catch { /* skip unparseable rule */ }
+  }
+
+  if (!events.length) return NextResponse.json({ sent: 0 })
 
   let sent = 0
   for (const ev of events) {

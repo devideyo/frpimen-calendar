@@ -51,21 +51,21 @@ export async function POST(req: Request) {
 
     const { data: tasks } = await supabase
       .from('tasks')
-      .select('title, status, priority, due_date')
+      .select('title, status, priority, due_at')
       .eq('owner_id', user.id)
       .eq('status', 'open')
-      .order('due_date', { ascending: true })
+      .order('due_at', { ascending: true })
       .limit(30)
 
     const tz = process.env.NEXT_PUBLIC_APP_TIMEZONE || 'America/Chicago'
-    const system = `You are a helpful calendar assistant for Fr. Pimen, a Catholic priest in Prosper, TX.
+    const system = `You are a helpful calendar assistant for Fr. Pimen, a Coptic Orthodox priest in Prosper, TX.
 Current date/time in Central Time: ${nowLocalStr}. All event times below are in UTC — convert to Central Time for display.
 
 Upcoming events (next 30 days):
 ${(events ?? []).map(e => { const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); return `- ${e.title} | ${fmt.format(new Date(e.starts_at))} to ${new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' }).format(new Date(e.ends_at))} | ${e.location ?? 'no location'} | ${e.busy_level}`; }).join('\n') || '(none)'}
 
 Open tasks:
-${(tasks ?? []).map(t => `- ${t.title} | priority: ${t.priority} | due: ${t.due_date ?? 'no date'}`).join('\n') || '(none)'}
+${(tasks ?? []).map(t => `- ${t.title} | priority: ${t.priority} | due: ${t.due_at ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(t.due_at)) : 'no date'}`).join('\n') || '(none)'}
 
 Answer concisely. Use friendly tone. When listing events or tasks, format cleanly.`
 

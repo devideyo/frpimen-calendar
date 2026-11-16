@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 const DEFAULT_TYPES = [
-  { name: 'Mass',          color: '#a855f7', category: 'liturgy',  default_duration_minutes: 60 },
+  { name: 'Divine Liturgy', color: '#a855f7', category: 'liturgy',  default_duration_minutes: 60 },
   { name: 'Confession',    color: '#6366f1', category: 'sacrament', default_duration_minutes: 30 },
   { name: 'Baptism',       color: '#06b6d4', category: 'sacrament', default_duration_minutes: 60 },
   { name: 'Wedding',       color: '#ec4899', category: 'sacrament', default_duration_minutes: 90 },
