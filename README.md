@@ -23,6 +23,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 ANTHROPIC_API_KEY=
 RESEND_API_KEY=
 CRON_SECRET=               # random string for /api/cron/* auth
+CANCEL_SECRET=             # REQUIRED: random 32+ char string signing booking cancel links (separate from CRON_SECRET; bookings fail closed without it)
 ALLOWED_EMAILS=            # comma-separated; only these may sign in
 VAPID_PUBLIC_KEY=          # web-push (run `npx web-push generate-vapid-keys`)
 VAPID_PRIVATE_KEY=
