@@ -1,10 +1,10 @@
 'use server'
 
 import { createClient as createServiceClient } from '@supabase/supabase-js'
-import crypto from 'crypto'
+import { verifyCancel } from '@/lib/cancel-token'
+import { escapeHtml } from '@/lib/html'
 
 export async function cancelAttendee(id: string, sig: string) {
-  const secret = process.env.CANCEL_SECRET ?? process.env.CRON_SECRET ?? 'fallback-rotate'
   const sb = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
   const { data: attendee } = await sb
@@ -14,29 +14,35 @@ export async function cancelAttendee(id: string, sig: string) {
     .single()
   if (!attendee) return { error: 'not found' }
 
-  const expected = crypto.createHmac('sha256', secret).update(`${attendee.id}:${attendee.event_id}`).digest('hex').slice(0, 32)
-  if (sig !== expected) return { error: 'invalid signature' }
+  // Fails closed (invalid) when CANCEL_SECRET is unset; constant-time compare
+  if (!verifyCancel(attendee.id, attendee.event_id, sig)) return { error: 'invalid signature' }
   if (attendee.canceled_at) return { error: 'already cancelled' }
 
-  // Mark cancelled + delete the event (since this was a 1-on-1 booking)
+  // Read the event BEFORE deleting it so we can notify the priest
+  const { data: event } = await sb.from('events').select('*').eq('id', attendee.event_id).single()
+
+  const isBooking = !!event && (event.source === 'booking' || (event.description ?? '').startsWith('Booked via '))
+
   await sb.from('event_attendees').update({ canceled_at: new Date().toISOString(), rsvp_status: 'declined' }).eq('id', id)
-  await sb.from('events').delete().eq('id', attendee.event_id)
+  // Only delete events that were created through a booking link; otherwise just mark the attendee declined
+  if (event && isBooking) {
+    await sb.from('events').delete().eq('id', attendee.event_id)
+  }
 
   // Notify priest
   try {
-    const { sendEmail } = await import('@/lib/email/send')
-    const { data: event } = await sb.from('events').select('starts_at, title, owner_id').eq('id', attendee.event_id).single()
     if (event) {
+      const { sendEmail } = await import('@/lib/email/send')
       const { data: { user: ownerUser } } = await sb.auth.admin.getUserById(event.owner_id)
       if (ownerUser?.email) {
         await sendEmail(
           ownerUser.email,
-          `Cancelled: ${event.title}`,
-          `<div style="font-family:system-ui,sans-serif;padding:24px"><p>${attendee.name ?? attendee.email} cancelled their booking.</p></div>`
+          `Cancelled: ${event.title}`.replace(/[\r\n]+/g, ' '),
+          `<div style="font-family:system-ui,sans-serif;padding:24px"><p>${escapeHtml(attendee.name ?? attendee.email)} cancelled their booking.</p><p style="color:#525252">${escapeHtml(event.title)} — ${escapeHtml(new Date(event.starts_at).toLocaleString('en-US', { timeZone: 'America/Chicago', dateStyle: 'full', timeStyle: 'short' }))}</p></div>`
         )
       }
     }
-  } catch {}
+  } catch (e) { console.error('cancel notify failed', e) }
 
   return { success: true }
 }

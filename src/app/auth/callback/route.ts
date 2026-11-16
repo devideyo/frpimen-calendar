@@ -1,10 +1,22 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
+// Only same-origin relative paths: must start with a single '/', no '//', '\\', '@' tricks.
+function safeNext(raw: string | null, origin: string): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '/'
+  try {
+    const u = new URL(raw, origin)
+    if (u.origin !== origin) return '/'
+    return u.pathname + u.search
+  } catch {
+    return '/'
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/'
+  const next = safeNext(searchParams.get('next'), origin)
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=missing_code`)
@@ -14,7 +26,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
   if (error || !data.session) {
-    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error?.message ?? 'session_failed')}`)
+    return NextResponse.redirect(`${origin}/login?error=session_failed`)
   }
 
   // Check allowed emails
@@ -44,5 +56,5 @@ export async function GET(request: Request) {
       .eq('id', data.session.user.id)
   }
 
-  return NextResponse.redirect(`${origin}${next}`)
+  return NextResponse.redirect(new URL(next, origin))
 }
